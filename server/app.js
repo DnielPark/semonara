@@ -11,6 +11,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const database = require('./database/connection');
+const ideRouter = require('./routes/ide');
 
 // ================================================================
 // 환경 설정
@@ -24,6 +25,9 @@ const app = express();
 let server; // 글로벌 서버 변수
 
 console.log('🚀 Starting Semonara Server in development mode...');
+
+// ideRouter 등록 (app 정의 후)
+app.use('/ide', ideRouter);
 
 // ================================================================
 // 미들웨어 설정

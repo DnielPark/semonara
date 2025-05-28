@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🇰🇷 한글 IDE - Semonara</title>
+    <link rel="stylesheet" href="/ide/static/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🇰🇷</text></svg>">
+</head>
+<body>
+    <div class="ide-container">
+        <!-- 헤더 -->
+        <div class="header">
+            <div class="header-left">
+                <h1>🇰🇷 한글 IDE</h1>
+                <span class="subtitle">Semonara Project</span>
+            </div>
+            <div class="header-right">
+                <span class="status" id="connectionStatus">연결 확인 중...</span>
+                <button class="header-btn" onclick="showHelp()">💡 도움말</button>
+            </div>
+        </div>
+
+        <!-- 툴바 -->
+        <div class="toolbar">
+            <div class="toolbar-group">
+                <button onclick="newFile()" title="새 파일 (Ctrl+N)">
+                    📄 새 파일
+                </button>
+                <button onclick="showOpenDialog()" title="파일 열기 (Ctrl+O)">
+                    📂 열기
+                </button>
+                <button onclick="saveFile()" title="파일 저장 (Ctrl+S)">
+                    💾 저장
+                </button>
+                <button onclick="refreshFileList()" title="파일 목록 새로고침 (F4)">
+                    🔄 새로고침
+                </button>
+            </div>
+            
+            <div class="toolbar-group">
+                <button onclick="runCode()" class="btn-success" title="코드 실행 (F5)">
+                    ▶️ 실행
+                </button>
+                <button onclick="compileCode()" class="btn-warning" title="한글→영문 변환 (F6)">
+                    🔄 한글→영문
+                </button>
+                <button onclick="decompileCode()" class="btn-info" title="영문→한글 변환 (F7)">
+                    🔄 영문→한글
+                </button>
+            </div>
+            
+            <div class="toolbar-right">
+                <span class="file-name" id="currentFileName">새 파일.한글js</span>
+                <span class="file-status" id="fileStatus">●</span>
+            </div>
+        </div>
+
+        <!-- 메인 컨텐츠 -->
+        <div class="main-content">
+            <!-- 사이드바 -->
+            <div class="sidebar">
+                <div class="sidebar-section">
+                    <div class="section-header">
+                        <h3>📁 파일 목록</h3>
+                        <button class="mini-btn" onclick="refreshFileList()" title="새로고침">🔄</button>
+                    </div>
+                    <div class="file-list" id="fileList">
+                        <div class="file-item active" onclick="selectFile(this, '새 파일.한글js')">
+                            <span class="file-icon">📄</span>
+                            <span class="file-name">새 파일.한글js</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="sidebar-section">
+                    <div class="section-header">
+                        <h3>🔧 한글 키워드</h3>
+                        <span class="keyword-count" id="keywordCount">로딩중...</span>
+                    </div>
+                    <div class="keyword-search">
+                        <input type="text" placeholder="키워드 검색..." id="keywordSearch" oninput="filterKeywords()">
+                    </div>
+                    <div class="keyword-list" id="keywordList">
+                        <div class="loading-keywords">키워드 로딩 중...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 편집기 영역 -->
+            <div class="editor-panel">
+                <div class="editor-tabs">
+                    <div class="tab active" id="mainTab">
+                        <span class="tab-icon">📄</span>
+                        <span class="tab-name">새 파일.한글js</span>
+                        <button class="tab-close" onclick="closeTab()" title="닫기">×</button>
+                    </div>
+                </div>
+                
+                <div class="editor-container">
+                    <div id="editor"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 출력 패널 -->
+        <div class="output-panel" id="outputPanel">
+            <div class="output-header">
+                <div class="output-tabs">
+                    <button class="output-tab active" data-tab="result" onclick="showOutputTab('result')">📋 실행 결과</button>
+                    <button class="output-tab" data-tab="compile" onclick="showOutputTab('compile')">🔄 변환 결과</button>
+                    <button class="output-tab" data-tab="console" onclick="showOutputTab('console')">💬 콘솔</button>
+                </div>
+                <div class="output-controls">
+                    <button class="mini-btn" onclick="clearOutput()" title="출력 지우기">🗑️</button>
+                    <button class="mini-btn" onclick="toggleOutput()" title="패널 닫기">✕</button>
+                </div>
+            </div>
+            <div class="output-content" id="outputContent">
+                <div class="welcome-message">
+                    <h3>🎉 한글 IDE에 오신 것을 환영합니다!</h3>
+                    <p>한글로 Node.js 코드를 작성하고 브라우저에서 바로 실행해보세요.</p>
+                    <div class="shortcut-guide">
+                        <h4>⌨️ 단축키</h4>
+                        <ul>
+                            <li><kbd>F5</kbd> - 코드 실행</li>
+                            <li><kbd>F6</kbd> - 한글→영문 변환</li>
+                            <li><kbd>F7</kbd> - 영문→한글 변환</li>
+                            <li><kbd>Ctrl+S</kbd> - 파일 저장</li>
+                            <li><kbd>Ctrl+N</kbd> - 새 파일</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 상태바 -->
+        <div class="status-bar">
+            <div class="status-left">
+                <span>Semonara 한글 IDE v1.0</span>
+                <span class="separator">|</span>
+                <span id="serverStatus">서버 확인중...</span>
+            </div>
+            <div class="status-right">
+                <span id="cursorPosition">줄 1, 열 1</span>
+                <span class="separator">|</span>
+                <span id="fileEncoding">UTF-8</span>
+                <span class="separator">|</span>
+                <span id="languageMode">한글JS</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 모달들 -->
+    <!-- 도움말 모달 -->
+    <div class="modal" id="helpModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🎯 한글 IDE 도움말</h2>
+                <button class="modal-close" onclick="closeModal('helpModal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="help-section">
+                    <h3>💡 주요 기능</h3>
+                    <ul>
+                        <li><strong>한글 키워드:</strong> 함수, 변수, 만약, 반복 등 한글로 프로그래밍</li>
+                        <li><strong>실시간 컴파일:</strong> 한글 코드를 영문으로 자동 변환</li>
+                        <li><strong>서버 실행:</strong> 작성한 코드를 서버에서 직접 실행</li>
+                        <li><strong>파일 관리:</strong> 브라우저에서 파일 저장/로드</li>
+                        <li><strong>양방향 변환:</strong> 기존 영문 코드를 한글로 변환</li>
+                    </ul>
+                </div>
+                
+                <div class="help-section">
+                    <h3>⌨️ 단축키</h3>
+                    <div class="shortcut-grid">
+                        <div class="shortcut-item">
+                            <kbd>F5</kbd>
+                            <span>코드 실행</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <kbd>F6</kbd>
+                            <span>한글→영문</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <kbd>F7</kbd>
+                            <span>영문→한글</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <kbd>Ctrl+N</kbd>
+                            <span>새 파일</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <kbd>Ctrl+S</kbd>
+                            <span>파일 저장</span>
+                        </div>
+                        <div class="shortcut-item">
+                            <kbd>Ctrl+O</kbd>
+                            <span>파일 열기</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="help-section">
+                    <h3>📝 한글 키워드 예시</h3>
+                    <div class="code-example">
+함수 환영메시지() {
+    콘솔.출력("안녕하세요! 한글 IDE입니다! 🎉");
+    변수 사용자 = "개발자";
+    콘솔.출력(`환영합니다, ${사용자}님!`);
+}
+
+비동기 함수 데이터가져오기() {
+    시도 {
+        변수 결과 = 기다리기 fetch('/api/data');
+        변수 데이터 = 기다리기 결과.json();
+        반환 데이터;
+    } 잡기 (오류) {
+        콘솔.오류("데이터 가져오기 실패:", 오류);
+    }
+}
+
+환영메시지();
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 파일 열기 모달 -->
+    <div class="modal" id="openModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📂 파일 열기</h2>
+                <button class="modal-close" onclick="closeModal('openModal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="open-file-list" id="openFileList">
+                    <div class="loading">파일 목록을 불러오는 중...</div>
+                </div>
+                <div class="modal-buttons">
+                    <button onclick="closeModal('openModal')" class="btn-secondary">취소</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 파일 저장 모달 -->
+    <div class="modal" id="saveModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>💾 파일 저장</h2>
+                <button class="modal-close" onclick="closeModal('saveModal')">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="saveFileName">파일명:</label>
+                    <input type="text" id="saveFileName" placeholder="예: 내코드.한글js" value="새 파일.한글js">
+                    <div class="file-extension-hint">
+                        💡 <strong>.한글js</strong> 확장자를 사용하면 한글 코드로 인식됩니다.
+                    </div>
+                </div>
+                <div class="modal-buttons">
+                    <button onclick="confirmSave()" class="btn-primary">💾 저장</button>
+                    <button onclick="closeModal('saveModal')" class="btn-secondary">취소</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 로딩 오버레이 -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text" id="loadingText">처리 중...</div>
+        </div>
+    </div>
+
+    <!-- 토스트 알림 -->
+    <div class="toast" id="toast">
+        <div class="toast-content">
+            <span class="toast-icon" id="toastIcon">ℹ️</span>
+            <span class="toast-message" id="toastMessage">알림 메시지</span>
+        </div>
+    </div>
+
+    <!-- 스크립트 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+    <script src="/ide/static/app.js"></script>
+</body>
+</html>
