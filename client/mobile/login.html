@@ -129,19 +129,77 @@
         <!-- 하단 정보 -->
         <div class="text-center mt-6 text-sm text-gray-500">
             <p>인증코드는 5분간 유효합니다</p>
-            <p class="mt-1">세션은 30분간 유지됩니다</p>
+            <p class="mt-1">최대 3개 기기까지 동시 로그인 가능</p>
         </div>
     </div>
 
     <script>
         console.log('JavaScript 시작');
         
-        // API 기본 설정 - HTTP 강제 지정
+        // API 기본 설정
         const API_BASE = 'http://223.130.163.170:3000';
         
         console.log('API_BASE:', API_BASE);
         
+        // ================================================================
+        // 기기 핑거프린팅 함수들
+        // ================================================================
+        
+        // 클라이언트 측 기기 고유 식별자 생성
+        function generateClientFingerprint() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            ctx.textBaseline = 'top';
+            ctx.font = '14px Arial';
+            ctx.fillText('Device fingerprint', 2, 2);
+            
+            const fingerprint = [
+                navigator.userAgent,
+                navigator.language,
+                screen.width + 'x' + screen.height,
+                screen.colorDepth,
+                new Date().getTimezoneOffset(),
+                !!window.sessionStorage,
+                !!window.localStorage,
+                navigator.hardwareConcurrency || 'unknown',
+                canvas.toDataURL()
+            ].join('|');
+            
+            // 간단한 해시 생성
+            let hash = 0;
+            for (let i = 0; i < fingerprint.length; i++) {
+                const char = fingerprint.charCodeAt(i);
+                hash = ((hash << 5) - hash) + char;
+                hash = hash & hash; // 32bit 정수로 변환
+            }
+            
+            return Math.abs(hash).toString(16);
+        }
+        
+        // 세션 ID 생성 (브라우저 세션별 고유)
+        function generateSessionId() {
+            if (!sessionStorage.getItem('semonara_session_id')) {
+                const sessionId = Date.now().toString(36) + Math.random().toString(36).substr(2);
+                sessionStorage.setItem('semonara_session_id', sessionId);
+            }
+            return sessionStorage.getItem('semonara_session_id');
+        }
+        
+        // API 요청시 기기 식별 헤더 추가
+        function addDeviceHeaders(headers = {}) {
+            return {
+                ...headers,
+                'X-Device-Fingerprint': generateClientFingerprint(),
+                'X-Session-Id': generateSessionId()
+            };
+        }
+        
+        console.log('기기 핑거프린트:', generateClientFingerprint());
+        console.log('세션 ID:', generateSessionId());
+        
+        // ================================================================
         // DOM 요소들
+        // ================================================================
         const emailStep = document.getElementById('email-step');
         const codeStep = document.getElementById('code-step');
         const emailForm = document.getElementById('email-form');
@@ -165,6 +223,10 @@
 
         console.log('DOM 요소 확인 완료');
 
+        // ================================================================
+        // UI 헬퍼 함수들
+        // ================================================================
+        
         // 에러/성공 메시지 표시
         function showError(message) {
             errorText.textContent = message;
@@ -200,16 +262,18 @@
 
         // 버튼 클릭 피드백
         function showButtonFeedback(button, message) {
-            // 버튼 클릭 효과
             button.style.transform = 'scale(0.98)';
             setTimeout(() => {
                 button.style.transform = 'scale(1)';
             }, 100);
             
-            // 즉시 메시지 표시
             showSuccess(message);
         }
 
+        // ================================================================
+        // 인증 처리 함수들
+        // ================================================================
+        
         // 1단계: 이메일 코드 요청
         emailForm.addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -224,7 +288,6 @@
                 return;
             }
 
-            // 버튼 클릭 즉시 피드백
             showButtonFeedback(sendCodeBtn, '인증코드를 발송하고 있습니다...');
             setLoading(sendCodeBtn, sendCodeText, sendLoading, true);
 
@@ -233,10 +296,10 @@
             try {
                 const response = await fetch(`${API_BASE}/api/auth/request-code`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ email }),
+                    headers: addDeviceHeaders({
+                        'Content-Type': 'application/json'
+                    }),
+                    body: JSON.stringify({ email })
                 });
 
                 console.log('API 응답 받음:', response.status);
@@ -244,7 +307,6 @@
                 console.log('응답 데이터:', data);
 
                 if (response.ok) {
-                    // 성공: 2단계로 이동
                     sentEmailSpan.textContent = email;
                     emailStep.classList.add('hidden');
                     codeStep.classList.remove('hidden');
@@ -273,28 +335,41 @@
                 return;
             }
 
-            // 버튼 클릭 즉시 피드백
             showButtonFeedback(verifyBtn, '로그인을 처리하고 있습니다...');
             setLoading(verifyBtn, verifyText, verifyLoading, true);
 
             try {
                 const response = await fetch(`${API_BASE}/api/auth/verify-code`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: addDeviceHeaders({
+                        'Content-Type': 'application/json'
+                    }),
                     body: JSON.stringify({ 
                         email: emailInput.value.trim(), 
                         code 
-                    }),
+                    })
                 });
 
                 const data = await response.json();
+                console.log('로그인 응답:', data);
 
                 if (response.ok && data.token) {
-                    // 성공: 토큰 저장 후 대시보드로 이동
+                    // 토큰과 기기 정보 저장
                     localStorage.setItem('semonara_token', data.token);
-                    showSuccess('로그인 성공! 대시보드로 이동합니다...');
+                    
+                    // 기기 정보도 저장 (선택적)
+                    if (data.deviceInfo) {
+                        localStorage.setItem('semonara_device_info', JSON.stringify(data.deviceInfo));
+                        console.log('기기 정보:', data.deviceInfo);
+                    }
+                    
+                    // 토큰 정보 로그
+                    if (data.tokenInfo) {
+                        console.log('토큰 정보:', data.tokenInfo);
+                        showSuccess(`로그인 성공! ${data.deviceInfo.device}/${data.deviceInfo.os} 기기로 인식되었습니다.`);
+                    } else {
+                        showSuccess('로그인 성공! 대시보드로 이동합니다...');
+                    }
                     
                     setTimeout(() => {
                         window.location.href = '/mobile/dashboard.html';
@@ -325,32 +400,40 @@
             e.target.value = e.target.value.replace(/[^0-9]/g, '');
         });
 
-        // 페이지 로드 시 기존 토큰 확인
+        // ================================================================
+        // 페이지 로드 시 토큰 확인
+        // ================================================================
+        
         window.addEventListener('load', () => {
             console.log('페이지 로드 완료');
             const token = localStorage.getItem('semonara_token');
+            
             if (token) {
                 console.log('기존 토큰 발견, 유효성 검사 중...');
-                // 토큰이 있으면 유효성 검사
+                
+                // 토큰 유효성 검사 (기기 정보 포함)
                 fetch(`${API_BASE}/api/auth/status`, {
-                    headers: {
+                    headers: addDeviceHeaders({
                         'Authorization': `Bearer ${token}`
-                    }
+                    })
                 })
-                .then(response => {
-                    if (response.ok) {
-                        // 유효한 토큰이면 바로 대시보드로
+                .then(response => response.json())
+                .then(data => {
+                    if (data.authenticated) {
                         console.log('유효한 토큰, 대시보드로 리다이렉트');
+                        console.log('현재 기기:', data.currentDevice);
+                        console.log('모든 활성 기기:', data.allDevices);
                         window.location.href = '/mobile/dashboard.html';
                     } else {
-                        // 무효한 토큰이면 제거
                         console.log('무효한 토큰, 제거');
                         localStorage.removeItem('semonara_token');
+                        localStorage.removeItem('semonara_device_info');
                     }
                 })
-                .catch(() => {
-                    console.log('토큰 검증 실패, 제거');
+                .catch(error => {
+                    console.log('토큰 검증 실패, 제거:', error);
                     localStorage.removeItem('semonara_token');
+                    localStorage.removeItem('semonara_device_info');
                 });
             } else {
                 console.log('토큰 없음, 로그인 페이지 표시');

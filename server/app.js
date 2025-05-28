@@ -1,5 +1,5 @@
 // ================================================================
-// Semonara 서버 - 메인 애플리케이션
+// Semonara 서버 - 메인 애플리케이션 (ConnectionTracker 연동)
 // 경로: /home/ubuntu/semonara/server/app.js
 // 설명: Express 기반 웹 서버, API 및 정적 파일 서빙
 // ================================================================
@@ -14,8 +14,12 @@ const database = require('./database/connection');
 const ideRouter = require('./routes/ide');
 
 // ================================================================
-// 환경 설정
+// ConnectionTracker 및 TokenManager 연동 추가
 // ================================================================
+const connectionTracker = require('./middleware/connectionTracker');
+const tokenManager = require('./services/TokenManager');
+
+// 환경 설정
 const NODE_ENV = process.env.NODE_ENV || 'development';
 const PORT = process.env.PORT || 3000;
 const HOST = '0.0.0.0';
@@ -26,14 +30,11 @@ let server; // 글로벌 서버 변수
 
 console.log('🚀 Starting Semonara Server in development mode...');
 
-// ideRouter 등록 (app 정의 후)
-app.use('/ide', ideRouter);
-
 // ================================================================
-// 미들웨어 설정
+// 미들웨어 설정 (순서 중요!)
 // ================================================================
 
-// 보안 헤더 설정 (Helmet) - 개발용으로 완화
+// 1. 보안 헤더 설정 (Helmet) - 개발용으로 완화
 if (NODE_ENV === 'production') {
     // 프로덕션: 엄격한 보안
     app.use(helmet({
@@ -50,22 +51,22 @@ if (NODE_ENV === 'production') {
 } else {
     // 개발: CSP 비활성화, 기본 보안만 적용
     app.use(helmet({
-        contentSecurityPolicy: false, // CSP 완전 비활성화
-        crossOriginOpenerPolicy: false, // COOP 비활성화
-        crossOriginResourcePolicy: false, // CORP 비활성화
-        originAgentCluster: false // Origin-Agent-Cluster 비활성화
+        contentSecurityPolicy: false,
+        crossOriginOpenerPolicy: false,
+        crossOriginResourcePolicy: false,
+        originAgentCluster: false
     }));
     console.log('🔧 Development mode: CSP and strict security policies disabled');
 }
 
-// CORS 설정
+// 2. CORS 설정
 const corsOptions = {
     origin: function (origin, callback) {
         const allowedOrigins = [
             'http://localhost:3000',
             'http://127.0.0.1:3000',
             'https://www.semonara.com',
-            'http://223.130.163.170:3000' // 네이버 클라우드 IP 추가
+            'http://223.130.163.170:3000'
         ];
         
         if (!origin || allowedOrigins.includes(origin)) {
@@ -84,14 +85,23 @@ if (NODE_ENV === 'development') {
 
 app.use(cors(corsOptions));
 
-// JSON 파싱
+// 3. JSON 파싱
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Rate Limiting - 개발 모드에서는 완화
+// ================================================================
+// 4. ConnectionTracker 미들웨어 적용 (핵심!)
+// ================================================================
+app.use((req, res, next) => {
+    connectionTracker.trackRequest(req, res, next);
+});
+
+console.log('🌐 ConnectionTracker 미들웨어 적용 완료');
+
+// 5. Rate Limiting - 개발 모드에서는 완화
 const generalLimiter = rateLimit({
     windowMs: 1 * 60 * 1000, // 1분
-    max: NODE_ENV === 'development' ? 1000 : 100, // 개발: 1000개, 프로덕션: 100개
+    max: NODE_ENV === 'development' ? 1000 : 100,
     message: { error: 'Too many requests, please try again later.' },
     standardHeaders: true,
     legacyHeaders: false,
@@ -99,13 +109,13 @@ const generalLimiter = rateLimit({
 
 const emailLimiter = rateLimit({
     windowMs: 1 * 60 * 1000, // 1분
-    max: NODE_ENV === 'development' ? 100 : 10, // 개발: 100개, 프로덕션: 10개
+    max: NODE_ENV === 'development' ? 100 : 10,
     message: { error: 'Too many email requests, please try again later.' }
 });
 
 const loginLimiter = rateLimit({
     windowMs: 5 * 60 * 1000, // 5분
-    max: NODE_ENV === 'development' ? 200 : 20, // 개발: 200회, 프로덕션: 20회
+    max: NODE_ENV === 'development' ? 200 : 20,
     message: { error: 'Too many login attempts, please try again later.' }
 });
 
@@ -114,7 +124,7 @@ app.use('/api/', generalLimiter);
 app.use('/api/auth/request-code', emailLimiter);
 app.use('/api/auth/verify-code', loginLimiter);
 
-// 디바이스 감지 미들웨어
+// 6. 디바이스 감지 미들웨어
 app.use((req, res, next) => {
     const userAgent = req.get('User-Agent') || '';
     const isMobile = /Mobile|Android|iPhone|iPad/.test(userAgent);
@@ -126,7 +136,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// 요청 로깅 (개발 모드)
+// 7. 요청 로깅 (개발 모드)
 if (NODE_ENV === 'development') {
     app.use((req, res, next) => {
         const start = Date.now();
@@ -154,10 +164,69 @@ app.get('/', (req, res) => {
     res.redirect('/mobile/login.html');
 });
 
-// 헬스 체크 엔드포인트
+// ================================================================
+// 새로운 ConnectionTracker 관련 API 엔드포인트
+// ================================================================
+
+// 하트비트 엔드포인트 (ConnectionTracker 위임)
+app.get('/api/heartbeat', (req, res) => {
+    connectionTracker.handleHeartbeat(req, res);
+});
+
+// 연결 상태 통계 조회
+app.get('/api/connection-stats', (req, res) => {
+    try {
+        const stats = connectionTracker.getConnectionStats();
+        res.json({
+            success: true,
+            timestamp: Date.now(),
+            stats
+        });
+    } catch (error) {
+        console.error('연결 통계 조회 실패:', error);
+        res.status(500).json({
+            success: false,
+            message: '연결 통계를 조회할 수 없습니다.'
+        });
+    }
+});
+
+// 사용자별 연결 정보 조회
+app.get('/api/user-connection/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const connectionInfo = connectionTracker.getUserConnectionInfo(userId);
+        
+        if (connectionInfo) {
+            res.json({
+                success: true,
+                connectionInfo
+            });
+        } else {
+            res.status(404).json({
+                success: false,
+                message: '사용자 연결 정보를 찾을 수 없습니다.'
+            });
+        }
+    } catch (error) {
+        console.error('사용자 연결 정보 조회 실패:', error);
+        res.status(500).json({
+            success: false,
+            message: '연결 정보를 조회할 수 없습니다.'
+        });
+    }
+});
+
+// ================================================================
+// 기존 API 엔드포인트들
+// ================================================================
+
+// 헬스 체크 엔드포인트 (ConnectionTracker 정보 추가)
 app.get('/health', (req, res) => {
     const uptime = process.uptime();
     const memoryUsage = process.memoryUsage();
+    const connectionStats = connectionTracker.getConnectionStats();
+    const tokenStats = tokenManager.getStats();
     
     res.json({
         status: 'OK',
@@ -169,7 +238,9 @@ app.get('/health', (req, res) => {
         security: {
             csp_enabled: NODE_ENV === 'production',
             cors_strict: NODE_ENV === 'production'
-        }
+        },
+        connections: connectionStats,
+        tokens: tokenStats
     });
 });
 
@@ -184,7 +255,9 @@ app.get('/api/status', (req, res) => {
         endpoints: {
             auth: '/api/auth',
             archive: '/api/archive',
-            server: '/api/server'
+            server: '/api/server',
+            heartbeat: '/api/heartbeat',
+            connectionStats: '/api/connection-stats'
         },
         security_mode: NODE_ENV === 'development' ? 'relaxed' : 'strict'
     });
@@ -192,6 +265,9 @@ app.get('/api/status', (req, res) => {
 
 // 인증 관련 API 
 app.use('/api/auth', require('./routes/api/auth'));
+
+// IDE 라우터 등록
+app.use('/ide', ideRouter);
 
 // 아카이브(게시판) API  
 // app.use('/api/archive', require('./routes/api/archive'));
@@ -240,16 +316,21 @@ async function startServer() {
             console.log(`🌐 Environment: ${NODE_ENV}`);
             console.log(`🚀 Server URL: http://${HOST}:${PORT}`);
             console.log(`📱 Login Page: http://${HOST}:${PORT}/mobile/login.html`);
+            console.log(`🇰🇷 Korean IDE: http://${HOST}:${PORT}/ide`);
             console.log(`🔧 Health Check: http://${HOST}:${PORT}/health`);
             console.log(`📊 API Status: http://${HOST}:${PORT}/api/status`);
             console.log('='.repeat(60));
             console.log('📋 Available Endpoints:');
             console.log('   GET  /                    → Redirect to login');
             console.log('   GET  /mobile/login.html   → Login page');
+            console.log('   GET  /mobile/dashboard.html → Dashboard');
+            console.log('   GET  /ide                 → Korean IDE');
             console.log('   GET  /health              → Health check');
             console.log('   GET  /api/status          → API status');
+            console.log('   GET  /api/heartbeat       → Connection heartbeat');
+            console.log('   GET  /api/connection-stats → Connection statistics');
             console.log('='.repeat(60));
-            console.log('🛡️  Security Features:');
+            console.log('🛡️  Security & Monitoring Features:');
             
             if (NODE_ENV === 'development') {
                 console.log('   🔧 CSP: DISABLED (개발 모드)');
@@ -265,6 +346,9 @@ async function startServer() {
             
             console.log('   ✅ Device detection');
             console.log('   ✅ Error handling');
+            console.log('   🌐 ConnectionTracker: ACTIVE');
+            console.log('   🔐 TokenManager: ACTIVE');
+            console.log('   📡 SSE Support: ENABLED');
             console.log('='.repeat(60));
             console.log(`⏰ Started at: ${new Date().toLocaleString()}`);
             console.log(`🔄 Process ID: ${process.pid}`);
@@ -279,11 +363,21 @@ async function startServer() {
                 console.log('   🌐 CORS allowing all origins');
                 console.log('   🔓 CSP and strict security disabled');
                 console.log('   📱 External IP access enabled');
+                console.log('   🌐 Real-time connection tracking');
+                console.log('   🔐 Advanced token management');
                 console.log('='.repeat(60) + '\n');
                 
                 console.log('🌍 External Access URLs:');
                 console.log(`   🖥️  Desktop: http://223.130.163.170:${PORT}`);
                 console.log(`   📱 Mobile:  http://223.130.163.170:${PORT}/mobile/login.html`);
+                console.log(`   🇰🇷 Korean IDE: http://223.130.163.170:${PORT}/ide`);
+                console.log('='.repeat(60) + '\n');
+                
+                console.log('🔌 Real-time Features:');
+                console.log('   📡 SSE Session Events: /api/auth/session-events');
+                console.log('   💓 Heartbeat API: /api/heartbeat');
+                console.log('   📊 Connection Stats: /api/connection-stats');
+                console.log('   🔐 Token Statistics: /api/auth/stats');
                 console.log('='.repeat(60) + '\n');
             }
         });
@@ -295,7 +389,7 @@ async function startServer() {
 }
 
 // ================================================================
-// Graceful Shutdown 처리
+// Graceful Shutdown 처리 (ConnectionTracker 정리 포함)
 // ================================================================
 function gracefulShutdown(signal) {
     console.log(`\n🛑 Received ${signal}. Starting graceful shutdown...`);
@@ -311,6 +405,22 @@ function gracefulShutdown(signal) {
                 // 데이터베이스 연결 종료
                 if (database) {
                     database.close();
+                }
+                
+                // ConnectionTracker 정리
+                try {
+                    connectionTracker.cleanupInactiveConnections();
+                    console.log('✅ ConnectionTracker cleaned up');
+                } catch (error) {
+                    console.error('⚠️ ConnectionTracker cleanup warning:', error.message);
+                }
+                
+                // TokenManager 정리
+                try {
+                    tokenManager.cleanupExpiredTokens();
+                    console.log('✅ TokenManager cleaned up');
+                } catch (error) {
+                    console.error('⚠️ TokenManager cleanup warning:', error.message);
                 }
                 
                 process.exit(0);
